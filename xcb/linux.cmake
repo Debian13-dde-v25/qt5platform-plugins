@@ -4,6 +4,27 @@
 
 find_package(PkgConfig REQUIRED)
 
+function(find_compatible_qtxcb_headers base_dir qt_version out_var)
+    if(EXISTS "${base_dir}/${qt_version}")
+        set(${out_var} "${base_dir}/${qt_version}" PARENT_SCOPE)
+        return()
+    endif()
+
+    string(REGEX REPLACE "^([0-9]+\\.[0-9]+)\\..*" "\\1" qt_version_series "${qt_version}")
+    file(GLOB qt_xcb_header_dirs RELATIVE "${base_dir}" "${base_dir}/${qt_version_series}.*")
+    list(SORT qt_xcb_header_dirs)
+    list(REVERSE qt_xcb_header_dirs)
+
+    foreach(candidate IN LISTS qt_xcb_header_dirs)
+        if(IS_DIRECTORY "${base_dir}/${candidate}")
+            set(${out_var} "${base_dir}/${candidate}" PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+
+    set(${out_var} "" PARENT_SCOPE)
+endfunction()
+
 pkg_check_modules(
     XCB
     REQUIRED
@@ -85,14 +106,26 @@ else()
             message(FATAL_ERROR "Not support Qt Version: ${Qt5_VERSION}")
         endif()
     elseif(${QT_VERSION_MAJOR} STREQUAL "6")
-        list(GET Qt6Core_INCLUDE_DIRS 0 dir)
-        string(REPLACE "QtCore" "QtXcb" Qt6Xcb_INCLUDE_DIR ${dir})
-        if(EXISTS ${Qt6Xcb_INCLUDE_DIR}/${Qt6_VERSION}/QtXcb/private)
-            include_directories(${Qt6Xcb_INCLUDE_DIR}/${Qt6_VERSION}/QtXcb/private)
-        elseif(EXISTS ${CMAKE_CURRENT_LIST_DIR}/libqt6xcbqpa-dev/${Qt6_VERSION})
-            include_directories(${CMAKE_CURRENT_LIST_DIR}/libqt6xcbqpa-dev/${Qt6_VERSION})
+        set(qt6_xcb_private_header_dirs "")
+
+        if(TARGET Qt6::XcbQpaPrivate)
+            get_target_property(qt6_xcb_private_header_dirs Qt6::XcbQpaPrivate INTERFACE_INCLUDE_DIRECTORIES)
+        endif()
+
+        if(qt6_xcb_private_header_dirs)
+            include_directories(${qt6_xcb_private_header_dirs})
         else()
-            message(FATAL_ERROR "Not support Qt Version: ${Qt6_VERSION}")
+            list(GET Qt6Core_INCLUDE_DIRS 0 dir)
+            string(REPLACE "QtCore" "QtXcb" Qt6Xcb_INCLUDE_DIR ${dir})
+            find_compatible_qtxcb_headers("${CMAKE_CURRENT_LIST_DIR}/libqt6xcbqpa-dev" "${Qt6_VERSION}" qt6_xcb_fallback_headers)
+
+            if(EXISTS ${Qt6Xcb_INCLUDE_DIR}/${Qt6_VERSION}/QtXcb/private)
+                include_directories(${Qt6Xcb_INCLUDE_DIR}/${Qt6_VERSION}/QtXcb/private)
+            elseif(qt6_xcb_fallback_headers)
+                include_directories(${qt6_xcb_fallback_headers})
+            else()
+                message(FATAL_ERROR "Not support Qt Version: ${Qt6_VERSION}")
+            endif()
         endif()
     else()
         message(FATAL_ERROR "Not support Qt Version: ${QT_VERSION_MAJOR}")
